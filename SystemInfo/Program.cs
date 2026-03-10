@@ -37,6 +37,30 @@ namespace SystemInfo
 
         #endregion
 
+        #region Windows API — Console QuickEdit
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+        const int  STD_INPUT_HANDLE      = -10;
+        const uint ENABLE_QUICK_EDIT     = 0x0040;
+        const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+
+        static void EnableQuickEdit()
+        {
+            var hIn = GetStdHandle(STD_INPUT_HANDLE);
+            if (GetConsoleMode(hIn, out uint mode))
+                SetConsoleMode(hIn, mode | ENABLE_QUICK_EDIT | ENABLE_EXTENDED_FLAGS);
+        }
+
+        #endregion
+
         #region Windows API — Memory
 
         [StructLayout(LayoutKind.Sequential)]
@@ -69,6 +93,10 @@ namespace SystemInfo
         static Label lblMemUsed  = null!;
         static Label lblTemps    = null!;
 
+        // Color schemes
+        static ColorScheme baseScheme  = null!;  // light gray on dark gray (borders, static text)
+        static ColorScheme valueScheme = null!;  // white on dark gray (dynamic data)
+
         // Storage panel — one (left label, bar, right label) triple per drive, built at startup
         static readonly System.Collections.Generic.List<(Label lbl, StorageBar bar, Label freeLbl)> storageRows = new();
         static FrameView storageFrame = null!;
@@ -79,12 +107,39 @@ namespace SystemInfo
             StopScreensaver();
 
             Application.Init();
+            EnableQuickEdit();   // restore console text-select so user can copy with mouse
             var top = Application.Top;
+
+            baseScheme = new ColorScheme
+            {
+                Normal    = Application.Driver.MakeAttribute(Color.DarkGray, Color.Black),
+                Focus     = Application.Driver.MakeAttribute(Color.DarkGray, Color.Black),
+                HotNormal = Application.Driver.MakeAttribute(Color.DarkGray, Color.Black),
+                HotFocus  = Application.Driver.MakeAttribute(Color.Gray,     Color.Black),
+                Disabled  = Application.Driver.MakeAttribute(Color.DarkGray, Color.Black),
+            };
+            valueScheme = new ColorScheme
+            {
+                Normal    = Application.Driver.MakeAttribute(Color.Gray,     Color.Black),
+                Focus     = Application.Driver.MakeAttribute(Color.Gray,     Color.Black),
+                HotNormal = Application.Driver.MakeAttribute(Color.Gray,     Color.Black),
+                HotFocus  = Application.Driver.MakeAttribute(Color.White,    Color.Black),
+                Disabled  = Application.Driver.MakeAttribute(Color.DarkGray, Color.Black),
+            };
+            var winScheme = new ColorScheme
+            {
+                Normal    = Application.Driver.MakeAttribute(Color.White,    Color.Black),
+                Focus     = Application.Driver.MakeAttribute(Color.White,    Color.Black),
+                HotNormal = Application.Driver.MakeAttribute(Color.White,    Color.Black),
+                HotFocus  = Application.Driver.MakeAttribute(Color.White,    Color.Black),
+                Disabled  = Application.Driver.MakeAttribute(Color.Gray,     Color.Black),
+            };
 
             var win = new Window("SystemInfo")
             {
                 X = 0, Y = 0,
-                Width = Dim.Fill(), Height = Dim.Fill()
+                Width = Dim.Fill(), Height = Dim.Fill(),
+                ColorScheme = winScheme
             };
             top.Add(win);
 
@@ -92,12 +147,19 @@ namespace SystemInfo
             var sysFrame = new FrameView("System")
             {
                 X = 0, Y = 0,
-                Width = Dim.Percent(50), Height = 7
+                Width = Dim.Percent(50), Height = 7,
+                ColorScheme = baseScheme
             };
-            lblMachine  = new Label("") { X = 1, Y = 0 };
-            lblOs       = new Label("") { X = 1, Y = 1 };
-            lblPlatform = new Label("") { X = 1, Y = 2 };
-            lblVersion  = new Label("") { X = 1, Y = 3 };
+            // Static prefix labels (dark gray, inherited from baseScheme)
+            sysFrame.Add(new Label("Machine : ") { X = 1, Y = 0 });
+            sysFrame.Add(new Label("OS      : ") { X = 1, Y = 1 });
+            sysFrame.Add(new Label("Platform: ") { X = 1, Y = 2 });
+            sysFrame.Add(new Label("Version : ") { X = 1, Y = 3 });
+            // Value labels (light gray)
+            lblMachine  = new Label("") { X = 11, Y = 0, ColorScheme = valueScheme };
+            lblOs       = new Label("") { X = 11, Y = 1, ColorScheme = valueScheme };
+            lblPlatform = new Label("") { X = 11, Y = 2, ColorScheme = valueScheme };
+            lblVersion  = new Label("") { X = 11, Y = 3, ColorScheme = valueScheme };
             sysFrame.Add(lblMachine, lblOs, lblPlatform, lblVersion);
             win.Add(sysFrame);
 
@@ -105,9 +167,10 @@ namespace SystemInfo
             var netFrame = new FrameView("Network")
             {
                 X = Pos.Right(sysFrame), Y = 0,
-                Width = Dim.Fill(), Height = 7
+                Width = Dim.Fill(), Height = 7,
+                ColorScheme = baseScheme
             };
-            lblIps = new Label("") { X = 1, Y = 0 };
+            lblIps = new Label("") { X = 1, Y = 0, ColorScheme = valueScheme };
             netFrame.Add(lblIps);
             win.Add(netFrame);
 
@@ -115,9 +178,10 @@ namespace SystemInfo
             var tempFrame = new FrameView("Temperature")
             {
                 X = 0, Y = Pos.Bottom(sysFrame),
-                Width = Dim.Percent(50), Height = 8
+                Width = Dim.Percent(50), Height = 8,
+                ColorScheme = baseScheme
             };
-            lblTemps = new Label("") { X = 1, Y = 0 };
+            lblTemps = new Label("") { X = 1, Y = 0, ColorScheme = valueScheme };
             tempFrame.Add(lblTemps);
             win.Add(tempFrame);
 
@@ -125,11 +189,17 @@ namespace SystemInfo
             var memFrame = new FrameView("Memory")
             {
                 X = Pos.Right(tempFrame), Y = Pos.Bottom(netFrame),
-                Width = Dim.Fill(), Height = 8
+                Width = Dim.Fill(), Height = 8,
+                ColorScheme = baseScheme
             };
-            lblMemTotal = new Label("") { X = 1, Y = 0 };
-            lblMemAvail = new Label("") { X = 1, Y = 1 };
-            lblMemUsed  = new Label("") { X = 1, Y = 2 };
+            // Static prefix labels (dark gray, inherited)
+            memFrame.Add(new Label("Total    : ") { X = 1, Y = 0 });
+            memFrame.Add(new Label("Available: ") { X = 1, Y = 1 });
+            memFrame.Add(new Label("Used     : ") { X = 1, Y = 2 });
+            // Value labels (light gray)
+            lblMemTotal = new Label("") { X = 12, Y = 0, ColorScheme = valueScheme };
+            lblMemAvail = new Label("") { X = 12, Y = 1, ColorScheme = valueScheme };
+            lblMemUsed  = new Label("") { X = 12, Y = 2, ColorScheme = valueScheme };
             memFrame.Add(lblMemTotal, lblMemAvail, lblMemUsed);
             win.Add(memFrame);
 
@@ -142,12 +212,13 @@ namespace SystemInfo
             storageFrame = new FrameView("Storage")
             {
                 X = 0, Y = Pos.Bottom(tempFrame),
-                Width = Dim.Fill(), Height = Dim.Fill() - 1
+                Width = Dim.Fill(), Height = Dim.Fill() - 1,
+                ColorScheme = baseScheme
             };
             var drives = StorageDrive.GetDrives();
             for (int i = 0; i < drives.Count; i++)
             {
-                var lbl = new Label("") { X = 1, Y = i * 2 };
+                var lbl = new Label("") { X = 1, Y = i * 2, ColorScheme = valueScheme };
                 var bar = new StorageBar
                 {
                     X        = leftWidth + 2,
@@ -156,7 +227,7 @@ namespace SystemInfo
                     Height   = 1,
                     Fraction = drives[i].UsedFraction
                 };
-                var freeLbl = new Label("") { X = Pos.AnchorEnd(freeWidth), Y = i * 2 };
+                var freeLbl = new Label("") { X = Pos.AnchorEnd(freeWidth), Y = i * 2, ColorScheme = valueScheme };
                 storageRows.Add((lbl, bar, freeLbl));
                 storageFrame.Add(lbl, bar, freeLbl);
             }
@@ -188,10 +259,10 @@ namespace SystemInfo
         static void RefreshData()
         {
             // System info
-            lblMachine.Text  = $"Machine : {Environment.MachineName}";
-            lblOs.Text       = $"OS      : {RuntimeInformation.OSDescription}";
-            lblPlatform.Text = $"Platform: {Environment.OSVersion.Platform}";
-            lblVersion.Text  = $"Version : {Environment.OSVersion.Version}";
+            lblMachine.Text  = Environment.MachineName;
+            lblOs.Text       = RuntimeInformation.OSDescription;
+            lblPlatform.Text = Environment.OSVersion.Platform.ToString();
+            lblVersion.Text  = Environment.OSVersion.Version.ToString();
 
             // Network
             var ips = MachineIPAddress.IPaddresses;
@@ -208,9 +279,9 @@ namespace SystemInfo
                 double total = mem.ullTotalPhys / Gb;
                 double avail = mem.ullAvailPhys / Gb;
                 double used  = 100.0 * (total - avail) / total;
-                lblMemTotal.Text = $"Total    : {total,7:0.00} GB";
-                lblMemAvail.Text = $"Available: {avail,7:0.00} GB";
-                lblMemUsed.Text  = $"Used     : {used,7:0.00} %";
+                lblMemTotal.Text = $"{total,7:0.00} GB";
+                lblMemAvail.Text = $"{avail,7:0.00} GB";
+                lblMemUsed.Text  = $"{used,7:0.00} %";
             }
 
             // Temperatures
